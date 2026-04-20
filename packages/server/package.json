@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "ts-node src/index.ts",
+    "migrate": "knex migrate:latest --knexfile knexfile.ts",
+    "migrate:rollback": "knex migrate:rollback --knexfile knexfile.ts",
     "test": "jest"
   },
   "keywords": [],
