@@ -34,3 +34,19 @@ export function validateQuery(schema: ZodType) {
     next();
   };
 }
+
+/**
+ * Returns Express middleware that validates req.params against the given schema.
+ * Used to verify URL parameters like :id are in the expected format (e.g. UUID)
+ * before they reach the database layer.
+ */
+export function validateParams(schema: ZodType) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const result = schema.safeParse(req.params);
+    if (!result.success) {
+      res.status(400).json({ error: result.error.issues[0].message });
+      return;
+    }
+    next();
+  };
+}
