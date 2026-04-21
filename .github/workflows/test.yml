@@ -1,0 +1,61 @@
+name: Tests
+
+# Run on every pull request and every push to main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  server-tests:
+    runs-on: ubuntu-latest
+
+    # Spin up a PostgreSQL service container for integration tests
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: password_manager_test
+        ports:
+          - 5432:5432
+        # Wait for PostgreSQL to be ready before running tests
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/password_manager_test
+      JWT_SECRET: test-jwt-secret-for-ci
+      SALT_HMAC_SECRET: test-salt-hmac-secret-for-ci-minimum-32-chars
+      PORT: 3000
+      ALLOWED_ORIGINS: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run migrations
+        working-directory: packages/server
+        run: npx knex migrate:latest --knexfile knexfile.ts
+
+      - name: Run server tests
+        working-directory: packages/server
+        run: npm test
+
+      - name: Run rate limit tests
+        working-directory: packages/server
+        run: npm run test:rate-limit
