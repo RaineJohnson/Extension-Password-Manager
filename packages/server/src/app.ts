@@ -3,6 +3,7 @@ import helmet from "helmet";
 import cors from "cors";
 import { corsOptions } from "./config/cors";
 import authRoutes from "./routes/auth";
+import vaultRoutes from "./routes/vault";
 
 const app = express();
 
@@ -14,7 +15,7 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-// Mount auth routes at /auth
 app.use("/auth", authRoutes);
+app.use("/vault", vaultRoutes);
 
 export default app;
