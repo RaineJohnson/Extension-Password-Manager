@@ -222,20 +222,13 @@ describe("POST /auth/logout", () => {
   it("invalidates the refresh token", async () => {
     // Verify clean state
     const tokenCount = await db("refresh_tokens").count("* as count");
-    console.log("refresh_tokens before login:", tokenCount);
 
     const { accessToken, refreshToken } = await loginTestUser();
-
-    console.log("access token exists:", !!accessToken);
-    console.log("refresh token exists:", !!refreshToken);
 
     const logoutRes = await request(app)
       .post("/auth/logout")
       .set("Authorization", `Bearer ${accessToken}`)
       .send({ refreshToken });
-
-    console.log("logout status:", logoutRes.status);
-    console.log("logout body:", logoutRes.body);
 
     expect(logoutRes.status).toBe(200);
 
