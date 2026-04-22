@@ -11,7 +11,8 @@
  *    autofill lookup) and the opaque blob.
  */
 
-import { EncryptedBlob, PlaintextPayload } from './types';
+import type { PlaintextPayload } from '@password-manager/shared';
+import { EncryptedBlob } from './types';
 import { decrypt, encrypt } from './aes';
 import { utf8Decode, utf8Encode } from './encoding';
 

@@ -1,5 +1,5 @@
 {
-  "name": "@extension-password-manager/crypto",
+  "name": "@password-manager/crypto",
   "version": "0.1.0",
   "private": true,
   "description": "Client-side cryptographic primitives for the password manager extension.",
@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@password-manager/shared": "*",
     "hash-wasm": "^4.11.0"
   },
   "devDependencies": {

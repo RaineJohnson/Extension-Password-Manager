@@ -65,23 +65,24 @@ describe('AES-256-GCM', () => {
   });
 
   it('handles large plaintext (1 MiB of random bytes)', async () => {
-  const key = generateVaultKey();
-  const plaintext = new Uint8Array(1024 * 1024);
-  const CHUNK = 65536;
-  for (let offset = 0; offset < plaintext.length; offset += CHUNK) {
-    crypto.getRandomValues(plaintext.subarray(offset, offset + CHUNK));
-  }
-  const blob = await encrypt(key, plaintext);
-  const recovered = await decrypt(key, blob);
+    const key = generateVaultKey();
+    const plaintext = new Uint8Array(1024 * 1024);
+    // Web Crypto caps getRandomValues at 65,536 bytes per call. Fill in chunks.
+    const CHUNK = 65536;
+    for (let offset = 0; offset < plaintext.length; offset += CHUNK) {
+      crypto.getRandomValues(plaintext.subarray(offset, offset + CHUNK));
+    }
+    const blob = await encrypt(key, plaintext);
+    const recovered = await decrypt(key, blob);
 
-  // Avoid Jest's deep-equality walk over a million elements — compare
-  // length plus a cryptographic digest, which is effectively free.
-  expect(recovered.length).toBe(plaintext.length);
-  const [expectedHash, actualHash] = await Promise.all([
-    crypto.subtle.digest('SHA-256', plaintext),
-    crypto.subtle.digest('SHA-256', recovered),
-  ]);
-  expect(new Uint8Array(actualHash)).toEqual(new Uint8Array(expectedHash));
+    // Avoid Jest's deep-equality walk over a million elements — compare
+    // length plus a cryptographic digest, which is effectively free.
+    expect(recovered.length).toBe(plaintext.length);
+    const [expectedHash, actualHash] = await Promise.all([
+      crypto.subtle.digest('SHA-256', plaintext),
+      crypto.subtle.digest('SHA-256', recovered),
+    ]);
+    expect(new Uint8Array(actualHash)).toEqual(new Uint8Array(expectedHash));
   });
 
   it('rejects keys that are not 32 bytes', async () => {

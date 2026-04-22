@@ -1,4 +1,4 @@
-# @extension-password-manager/crypto
+# @password-manager/crypto
 
 Client-side cryptographic primitives for the password manager extension.
 This package is a pure library — no extension APIs, no network, no
@@ -21,13 +21,17 @@ threat model this module implements.
 - **Vault key wrapping / unwrapping** under the derived key.
 - **Vault item encryption / decryption** with JSON payloads.
 
+The `PlaintextPayload` type (the decrypted shape of a vault item) is
+defined in `@password-manager/shared` and imported from there — it is
+the single source of truth shared with the server schema.
+
 ## Install & test
 
 This is a workspace package. From the repo root:
 
 ```bash
 npm install
-npm test --workspace @extension-password-manager/crypto
+npm test --workspace @password-manager/crypto
 ```
 
 Or from inside `packages/crypto`:
@@ -52,7 +56,7 @@ import {
   generateVaultKey,
   wrapVaultKey,
   zeroBuffer,
-} from '@extension-password-manager/crypto';
+} from '@password-manager/crypto';
 
 const saltA = generateSalt();
 const saltB = generateSalt();
@@ -77,7 +81,7 @@ import {
   deriveMaterial,
   unwrapVaultKey,
   zeroBuffer,
-} from '@extension-password-manager/crypto';
+} from '@password-manager/crypto';
 
 // After GET /auth/salts → { saltA, saltB }:
 const { derivedKey, authCredential } = await deriveMaterial(
@@ -95,20 +99,22 @@ zeroBuffer(derivedKey);
 ### Encrypting a vault item
 
 ```typescript
-import { encryptVaultItem } from '@extension-password-manager/crypto';
+import { encryptVaultItem } from '@password-manager/crypto';
+import type { PlaintextPayload } from '@password-manager/shared';
 
-const blob = await encryptVaultItem(vaultKey, {
+const payload: PlaintextPayload = {
   username: 'alice@example.com',
   password: 'hunter2',
   notes: 'optional',
-});
-// POST /vault/item with { site, encrypted_blob: blob }
+};
+const blob = await encryptVaultItem(vaultKey, payload);
+// POST /vault/item with { site, encryptedBlob: blob }
 ```
 
 ### Decrypting a vault item
 
 ```typescript
-import { decryptVaultItem } from '@extension-password-manager/crypto';
+import { decryptVaultItem } from '@password-manager/crypto';
 
 const { username, password, notes } = await decryptVaultItem(vaultKey, blob);
 ```
@@ -118,20 +124,20 @@ const { username, password, notes } = await decryptVaultItem(vaultKey, blob);
 ```
 src/
   index.ts       # public API
-  types.ts       # shared types + size constants + default params
+  types.ts       # size constants, default params, blob/material types
   random.ts      # salt / nonce / vault key generation
   encoding.ts    # base64, UTF-8, byte concatenation
   buffer.ts      # zeroBuffer (best-effort memory scrub)
   kdf.ts         # Argon2id — deriveKey, deriveMaterial
   aes.ts         # AES-256-GCM — encrypt, decrypt, parseBlob
-  vault.ts      # wrap/unwrap vault key, encrypt/decrypt vault item
+  vault.ts       # wrap/unwrap vault key, encrypt/decrypt vault item
 
 tests/
   setup.ts              # polyfills globalThis.crypto for old Node
   random.test.ts        # size and uniqueness checks
   aes.test.ts           # round-trip, tampering, wrong-key, edge sizes
   kdf.test.ts           # determinism, salt/password sensitivity, independence
-  vault.test.ts         # wrap/unwrap + vault item payload round-trip
+  vault.test.ts         # wrap/unwrap + payload round-trip + bad-JSON path
   roundtrip.test.ts     # full register/login/encrypt/decrypt flow
 ```
 

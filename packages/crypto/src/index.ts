@@ -1,11 +1,14 @@
 /**
- * @extension-password-manager/crypto
+ * @password-manager/crypto
  *
  * Client-side cryptographic primitives for the password manager extension.
  * Pure library: no extension APIs, no network calls, no storage.
  *
  * See the design document for the three-layer key hierarchy (master
  * password → derived key → vault key → vault items) and the threat model.
+ *
+ * `PlaintextPayload` (the decrypted shape of a vault item) lives in
+ * `@password-manager/shared`. Import it from there.
  */
 
 export * from './types';

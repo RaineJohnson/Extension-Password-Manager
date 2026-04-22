@@ -58,16 +58,26 @@ export async function encrypt(
  * Throws on any failure: malformed blob, tag mismatch (i.e. tampering
  * or wrong key), or a key of the wrong length. No plaintext is ever
  * returned when decryption fails.
+ *
+ * Implementation note: Web Crypto's `subtle.decrypt` for AES-GCM wants
+ * `ciphertext || tag` as one buffer. Rather than split the decoded
+ * bytes into three pieces and then allocate a fourth buffer to put
+ * ciphertext and tag back together, we slice the bytes directly with
+ * zero-copy subarrays — one `fromBase64` allocation per call.
  */
 export async function decrypt(
   keyBytes: Uint8Array,
   blob: EncryptedBlob,
 ): Promise<Uint8Array> {
-  const parsed = parseBlob(blob);
+  const bytes = fromBase64(blob);
+  if (bytes.length < NONCE_BYTES + TAG_BYTES) {
+    throw new Error('Ciphertext blob is too short to contain nonce + tag');
+  }
+  const nonce = bytes.subarray(0, NONCE_BYTES);
+  const ciphertextAndTag = bytes.subarray(NONCE_BYTES);
   const key = await importAesKey(keyBytes);
-  const ciphertextAndTag = concatBytes(parsed.ciphertext, parsed.tag);
   const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: parsed.nonce },
+    { name: 'AES-GCM', iv: nonce },
     key,
     ciphertextAndTag,
   );

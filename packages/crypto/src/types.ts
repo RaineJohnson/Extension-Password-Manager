@@ -6,6 +6,10 @@
  *  - 96-bit AES-GCM nonces (12 bytes)
  *  - 128-bit AES-GCM authentication tags (16 bytes)
  *  - 256-bit keys (32 bytes) for both the derived key and the vault key
+ *
+ * Note: `PlaintextPayload` (the decrypted shape of a vault item) lives in
+ * `@password-manager/shared` so the client and server reference the same
+ * definition. Import it from there, not from this module.
  */
 
 export const SALT_BYTES = 16;
@@ -20,17 +24,6 @@ export const KEY_BYTES = 32;
  * as `encrypted_vault_key` for the wrapped vault key.
  */
 export type EncryptedBlob = string;
-
-/**
- * The plaintext payload that lives inside each vault item's encrypted blob.
- *
- * The server never sees this shape — only the JSON-serialized, encrypted bytes.
- */
-export interface PlaintextPayload {
-  username: string;
-  password: string;
-  notes?: string;
-}
 
 /**
  * Raw bytes of an EncryptedBlob broken into its three components.
