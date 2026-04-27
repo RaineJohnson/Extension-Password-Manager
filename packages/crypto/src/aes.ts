@@ -10,6 +10,12 @@ import { EncryptedBlob, KEY_BYTES, NONCE_BYTES, ParsedBlob, TAG_BYTES } from './
 import { concatBytes, fromBase64, toBase64 } from './encoding';
 import { generateNonce } from './random';
 
+// Web Crypto's `BufferSource` is `ArrayBufferView<ArrayBuffer> | ArrayBuffer`,
+// but `Uint8Array` defaults to `Uint8Array<ArrayBufferLike>` (which also covers
+// SharedArrayBuffer). All bytes that flow through this module are
+// ArrayBuffer-backed at runtime, so the assertion is sound.
+const asSource = (b: Uint8Array): BufferSource => b as Uint8Array<ArrayBuffer>;
+
 /**
  * Import raw key bytes as a non-extractable AES-GCM CryptoKey.
  *
@@ -26,7 +32,7 @@ async function importAesKey(keyBytes: Uint8Array): Promise<CryptoKey> {
   }
   return crypto.subtle.importKey(
     'raw',
-    keyBytes,
+    asSource(keyBytes),
     { name: 'AES-GCM' },
     false,
     ['encrypt', 'decrypt'],
@@ -47,7 +53,11 @@ export async function encrypt(
   const key = await importAesKey(keyBytes);
   const nonce = generateNonce();
   const ciphertextAndTag = new Uint8Array(
-    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plaintext),
+    await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: asSource(nonce) },
+      key,
+      asSource(plaintext),
+    ),
   );
   return toBase64(concatBytes(nonce, ciphertextAndTag));
 }
@@ -65,10 +75,15 @@ export async function encrypt(
  * ciphertext and tag back together, we slice the bytes directly with
  * zero-copy subarrays — one `fromBase64` allocation per call.
  */
+// Return type is tightened to `Uint8Array<ArrayBuffer>` (rather than the
+// default `Uint8Array<ArrayBufferLike>`) so callers can pass the result
+// straight into Web Crypto APIs — `BufferSource` requires the ArrayBuffer
+// variant. Sound at runtime: we build the result via `new Uint8Array(plaintext)`
+// where plaintext is an ArrayBuffer.
 export async function decrypt(
   keyBytes: Uint8Array,
   blob: EncryptedBlob,
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const bytes = fromBase64(blob);
   if (bytes.length < NONCE_BYTES + TAG_BYTES) {
     throw new Error('Ciphertext blob is too short to contain nonce + tag');
@@ -77,9 +92,9 @@ export async function decrypt(
   const ciphertextAndTag = bytes.subarray(NONCE_BYTES);
   const key = await importAesKey(keyBytes);
   const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: nonce },
+    { name: 'AES-GCM', iv: asSource(nonce) },
     key,
-    ciphertextAndTag,
+    asSource(ciphertextAndTag),
   );
   return new Uint8Array(plaintext);
 }
