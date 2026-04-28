@@ -45,4 +45,7 @@ browser.runtime.onInstalled.addListener(() => {
 
 browser.runtime.onMessage.addListener((raw: unknown) => handle(raw as Request));
 
-void rehydrate();
+const ready = rehydrate();
+
+// In handle():
+await ready;
