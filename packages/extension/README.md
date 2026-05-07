@@ -77,5 +77,81 @@ browser close, on explicit lock, and (later) on idle timeout.
 npm test
 ```
 
-Currently covers the popup ↔ background message round-trip and the
-`storage.session` rehydration path.
+Covers the popup ↔ background message round-trip, the `storage.session`
+rehydration path, the mocked API client's canned responses, and the
+form validation helpers.
+
+## Reviewing the auth UI (for backend review)
+
+The Login and Register screens are wired to a **mocked** API client
+(`src/api/mockClient.ts`) so they can be designed and reviewed before
+the real `/auth/*` endpoints exist. No network calls leave the
+extension. The swap to the real client is a one-line change in
+`src/api/index.ts` once the backend is ready.
+
+### One-time setup
+
+From the **monorepo root** (so workspace deps resolve):
+
+```sh
+npm install
+npm --workspace @password-manager/extension run build:chrome
+# or: npm --workspace @password-manager/extension run build:firefox
+```
+
+That produces `packages/extension/dist-chrome/` (or `dist-firefox/`).
+
+### Load the extension
+
+**Chrome / Edge / Brave**
+
+1. Open `chrome://extensions`.
+2. Toggle **Developer mode** (top right).
+3. Click **Load unpacked** and select
+   `packages/extension/dist-chrome/`.
+4. Pin "Password Manager" from the toolbar puzzle-piece menu, then
+   click the icon to open the popup.
+
+**Firefox**
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on…** and pick
+   `packages/extension/dist-firefox/manifest.json`.
+3. Click the toolbar icon to open the popup.
+
+### Exercising every UI state
+
+The mock client recognises a few magic inputs so you can hit each
+state without juggling fixtures:
+
+| Action | Input | What you should see |
+| --- | --- | --- |
+| Field validation | Submit empty form | Inline errors under each field |
+| Password mismatch | Register, confirm ≠ password | "Master passwords do not match." |
+| Weak password | Register with `<12` chars | Inline length error + red strength bar |
+| Email already taken | Register `taken@example.com` + any 12+ char password | Red "An account with that email already exists." banner |
+| Network failure | Either screen, email `offline@example.com` | Red "Could not reach the server." banner |
+| Bad credentials | Register a fresh email, then try logging in with the wrong password | Red "That email and master password did not match." banner |
+| Loading state | Any submit | Button text becomes "Unlocking…" / "Creating account…", inputs disabled (~400ms latency simulated) |
+| Happy path | Register a fresh email, log in with same password | Routes to the placeholder authenticated screen |
+
+The mock's user store is in-memory and resets every time you close
+and reopen the popup (or reload the extension), so you can replay
+the happy path freely.
+
+### What I'd value feedback on
+
+- Copy: error messages, the master-password warning on Register, button labels.
+- Validation rules: minimum length is currently 12; password strength scoring is in `src/popup/validation.ts`.
+- The shape of the `ApiClient` interface in `src/api/client.ts` — is everything you need to return from the real endpoints expressible through this contract, or do we need to widen it (e.g. surfacing the encrypted vault key, refresh tokens, server-side error codes)?
+- Anything I should be doing differently before swapping the mock for the real `/auth/*` calls.
+
+### Iterating
+
+```sh
+npm --workspace @password-manager/extension run dev:chrome
+```
+
+Rebuilds on save. After each rebuild, click the circular reload
+arrow on the extension's card in `chrome://extensions` and reopen
+the popup — MV3 doesn't hot-reload source into a running extension.
