@@ -30,7 +30,10 @@ export async function persist(): Promise<void> {
   await browser.storage.session.set({ [STATE_KEY]: state });
 }
 
+const ready = rehydrate();
+
 export async function handle<R extends Request>(req: R): Promise<ResponseFor<R>> {
+  await ready;
   switch (req.type) {
     case 'ping':
       return { type: 'pong', receivedAt: Date.now() } as ResponseFor<R>;
@@ -44,8 +47,3 @@ browser.runtime.onInstalled.addListener(() => {
 });
 
 browser.runtime.onMessage.addListener((raw: unknown) => handle(raw as Request));
-
-const ready = rehydrate();
-
-// In handle():
-await ready;
