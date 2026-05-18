@@ -31,11 +31,45 @@ describe('popup ↔ background messaging', () => {
         accessToken: 'token',
         refreshToken: 'refresh',
         vaultKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+        unlockedUntil: Date.now() + 60_000,
       },
     });
     await rehydrate();
 
     const res = await sendMessage({ type: 'getStatus' });
     expect(res).toEqual({ type: 'getStatus', locked: false });
+  });
+
+  it('locks an expired rehydrated session', async () => {
+    await polyfill.storage.session.set({
+      state: {
+        locked: false,
+        email: 'alice@example.com',
+        accessToken: 'token',
+        refreshToken: 'refresh',
+        vaultKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+        unlockedUntil: Date.now() - 1,
+      },
+    });
+    await rehydrate();
+
+    const res = await sendMessage({ type: 'getStatus' });
+    expect(res).toEqual({ type: 'getStatus', locked: true });
+  });
+
+  it('locks a legacy unlocked session with no auto-lock deadline', async () => {
+    await polyfill.storage.session.set({
+      state: {
+        locked: false,
+        email: 'alice@example.com',
+        accessToken: 'token',
+        refreshToken: 'refresh',
+        vaultKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      },
+    });
+    await rehydrate();
+
+    const res = await sendMessage({ type: 'getStatus' });
+    expect(res).toEqual({ type: 'getStatus', locked: true });
   });
 });

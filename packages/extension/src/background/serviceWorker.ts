@@ -47,8 +47,8 @@ const tokens: TokenStore = {
 const http = new HttpClient({ baseUrl: API_BASE_URL, tokens });
 const deps = { http };
 
-export const ready = state.rehydrate();
-export const rehydrate = state.rehydrate;
+export const ready = state.initialize();
+export const rehydrate = state.initialize;
 
 async function dispatch(req: Request): Promise<Success> {
   switch (req.type) {
@@ -99,6 +99,7 @@ async function dispatch(req: Request): Promise<Success> {
 
 export async function handle(req: Request): Promise<Envelope> {
   await ready;
+  await state.expireIfNeeded();
   try {
     const data = await dispatch(req);
     return { ok: true, data };
