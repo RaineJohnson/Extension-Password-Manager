@@ -5,6 +5,7 @@
  *   - locked: is the vault locked?
  *   - accessToken / refreshToken: JWT pair from /auth/login
  *   - vaultKey: 32 bytes, base64-encoded for storage
+ *   - unlockedUntil: timestamp after which the session auto-locks
  *
  * Everything is mirrored to `chrome.storage.session`. On cold start the
  * worker calls `rehydrate()` to repopulate the in-memory cache. The
@@ -20,6 +21,11 @@ import browser from 'webextension-polyfill';
 import { fromBase64, toBase64 } from '@password-manager/crypto';
 
 const STATE_KEY = 'state';
+const AUTO_LOCK_MS = 15 * 60 * 1000;
+
+type SessionStorageArea = typeof browser.storage.session & {
+  setAccessLevel?: (opts: { accessLevel: 'TRUSTED_CONTEXTS' }) => Promise<void>;
+};
 
 interface PersistedState {
   locked: boolean;
@@ -33,6 +39,8 @@ interface PersistedState {
   refreshToken: string | null;
   /** Base64-encoded 32-byte vault key, or null when locked. */
   vaultKey: string | null;
+  /** Epoch milliseconds. Null when locked. */
+  unlockedUntil: number | null;
 }
 
 const lockedState: PersistedState = {
@@ -41,14 +49,36 @@ const lockedState: PersistedState = {
   accessToken: null,
   refreshToken: null,
   vaultKey: null,
+  unlockedUntil: null,
 };
 
 let cache: PersistedState = { ...lockedState };
 
+export async function initialize(): Promise<void> {
+  await restrictSessionStorageAccess();
+  await rehydrate();
+  await expireIfNeeded();
+}
+
+async function restrictSessionStorageAccess(): Promise<void> {
+  const session = browser.storage.session as SessionStorageArea;
+  if (typeof session.setAccessLevel !== 'function') return;
+  await session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+}
+
 export async function rehydrate(): Promise<void> {
   const stored = await browser.storage.session.get(STATE_KEY);
   const persisted = stored[STATE_KEY] as PersistedState | undefined;
-  cache = persisted ?? { ...lockedState };
+  cache = { ...lockedState, ...persisted };
+}
+
+export async function expireIfNeeded(now = Date.now()): Promise<void> {
+  if (
+    !cache.locked &&
+    (cache.unlockedUntil === null || cache.unlockedUntil <= now)
+  ) {
+    await lock();
+  }
 }
 
 async function persist(): Promise<void> {
@@ -56,7 +86,11 @@ async function persist(): Promise<void> {
 }
 
 export function isLocked(): boolean {
-  return cache.locked;
+  return (
+    cache.locked ||
+    cache.unlockedUntil === null ||
+    cache.unlockedUntil <= Date.now()
+  );
 }
 
 export function getEmail(): string | null {
@@ -99,6 +133,7 @@ export async function unlock(input: {
     accessToken: input.accessToken,
     refreshToken: input.refreshToken,
     vaultKey: toBase64(input.vaultKey),
+    unlockedUntil: Date.now() + AUTO_LOCK_MS,
   };
   await persist();
 }

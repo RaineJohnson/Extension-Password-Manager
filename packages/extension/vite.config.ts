@@ -3,9 +3,9 @@
  *
  * `npm run build:chrome` → `dist-chrome/`, `npm run build:firefox` →
  * `dist-firefox/`. The popup is an HTML entry; the background script and
- * content script are emitted at fixed top-level paths so the manifests can
- * reference them by name (`background.js`, `content.js`). A small inline
- * plugin copies the matching `manifests/<browser>.json` to
+ * background script is emitted at a fixed top-level path so the manifests can
+ * reference it by name (`background.js`). A small inline plugin copies the
+ * matching `manifests/<browser>.json` to
  * `dist-<browser>/manifest.json` after the bundle is written.
  */
 
@@ -30,6 +30,7 @@ const outDir = `dist-${browser}`;
 // `src/config/env.ts` reads `__API_BASE_URL__` and falls back to localhost
 // when the define is absent (Jest doesn't run this config).
 const apiBaseUrl = process.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+const sourcemap = process.env.VITE_SOURCEMAP === 'true';
 
 export default defineConfig({
   define: {
@@ -51,17 +52,15 @@ export default defineConfig({
   build: {
     outDir,
     emptyOutDir: true,
-    sourcemap: true,
+    sourcemap,
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'popup.html'),
         background: resolve(__dirname, 'src/background/serviceWorker.ts'),
-        content: resolve(__dirname, 'src/content/autofill.ts'),
       },
       output: {
         entryFileNames: (chunk) => {
           if (chunk.name === 'background') return 'background.js';
-          if (chunk.name === 'content') return 'content.js';
           return 'assets/[name]-[hash].js';
         },
         chunkFileNames: 'assets/[name]-[hash].js',
