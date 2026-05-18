@@ -25,7 +25,16 @@ if (browser !== 'chrome' && browser !== 'firefox') {
 
 const outDir = `dist-${browser}`;
 
+// API base URL is injected at build time via `define`. Override with
+// `VITE_API_BASE_URL=https://... npm run build:chrome` for non-local builds.
+// `src/config/env.ts` reads `__API_BASE_URL__` and falls back to localhost
+// when the define is absent (Jest doesn't run this config).
+const apiBaseUrl = process.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+
 export default defineConfig({
+  define: {
+    __API_BASE_URL__: JSON.stringify(apiBaseUrl),
+  },
   plugins: [
     react(),
     {

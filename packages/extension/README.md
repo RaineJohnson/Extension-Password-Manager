@@ -19,14 +19,27 @@ Load `dist-chrome/` via `chrome://extensions` → "Load unpacked", or
 ```
 popup (React)  ──runtime.sendMessage──▶  background service worker
                                               │
-                                              ├─ in-memory state
-                                              └─ storage.session (rehydrate)
+                                              ├─ in-memory state + storage.session
+                                              │     (locked, tokens, vault key)
+                                              ├─ auth.ts   ──▶  /auth/*
+                                              └─ vault.ts  ──▶  /vault/*
+                                                          (HttpClient + crypto)
 ```
 
 All popup → background traffic flows through the typed `sendMessage`
-helper in `src/shared/messages.ts`. Add a new request by extending the
-`Request` union and the `ResponseFor` conditional type, then handling
-the new `type` in `background/serviceWorker.ts`'s `handle`.
+helper in `src/shared/messages.ts`. Every reply is an `Envelope` —
+either `{ ok: true, data }` or `{ ok: false, code, message }`. The
+helper unwraps the envelope and throws `ApiError` on the error branch
+so pages can write a normal `try/catch`.
+
+The popup never sees Argon2id, AES, or the network. It hands plaintext
+to the worker; the worker derives material, talks HTTP, and (for vault
+items) encrypts/decrypts under the in-memory vault key. The server
+URL is injected at build time via `VITE_API_BASE_URL` (defaults to
+`http://localhost:3000`).
+
+Add a new request by extending the `Request`/`Success` unions in
+`src/shared/messages.ts` and the `switch` in `background/serviceWorker.ts`.
 
 ## Service worker lifecycle
 
@@ -77,29 +90,28 @@ browser close, on explicit lock, and (later) on idle timeout.
 npm test
 ```
 
-Covers the popup ↔ background message round-trip, the `storage.session`
-rehydration path, the mocked API client's canned responses, and the
-form validation helpers.
+Covers the popup ↔ background envelope round-trip, the
+`storage.session` rehydration path, the end-to-end auth and vault
+orchestrators (register → login → CRUD → lock, plus refresh-on-401
+and bad-credential branches against an in-memory `FakeServer`), and
+the form validation helpers.
 
-## Reviewing the auth UI (for backend review)
+## Running the full demo
 
-The Login and Register screens are wired to a **mocked** API client
-(`src/api/mockClient.ts`) so they can be designed and reviewed before
-the real `/auth/*` endpoints exist. No network calls leave the
-extension. The swap to the real client is a one-line change in
-`src/api/index.ts` once the backend is ready.
-
-### One-time setup
-
-From the **monorepo root** (so workspace deps resolve):
+The popup talks to a running server (no offline mock). One-time setup
+from the **monorepo root**:
 
 ```sh
 npm install
+npm --workspace @password-manager/server run migrate  # creates the SQLite/Postgres schema
+npm --workspace @password-manager/server run dev      # http://localhost:3000
 npm --workspace @password-manager/extension run build:chrome
 # or: npm --workspace @password-manager/extension run build:firefox
 ```
 
 That produces `packages/extension/dist-chrome/` (or `dist-firefox/`).
+For a non-local server, set `VITE_API_BASE_URL` before the build —
+the URL is baked into the bundle at compile time.
 
 ### Load the extension
 
@@ -119,32 +131,24 @@ That produces `packages/extension/dist-chrome/` (or `dist-firefox/`).
    `packages/extension/dist-firefox/manifest.json`.
 3. Click the toolbar icon to open the popup.
 
-### Exercising every UI state
+### Exercising the flows
 
-The mock client recognises a few magic inputs so you can hit each
-state without juggling fixtures:
+Pick any 12+ character master password — the server never sees it.
 
 | Action | Input | What you should see |
 | --- | --- | --- |
 | Field validation | Submit empty form | Inline errors under each field |
 | Password mismatch | Register, confirm ≠ password | "Master passwords do not match." |
 | Weak password | Register with `<12` chars | Inline length error + red strength bar |
-| Email already taken | Register `taken@example.com` + any 12+ char password | Red "An account with that email already exists." banner |
-| Network failure | Either screen, email `offline@example.com` | Red "Could not reach the server." banner |
-| Bad credentials | Register a fresh email, then try logging in with the wrong password | Red "That email and master password did not match." banner |
-| Loading state | Any submit | Button text becomes "Unlocking…" / "Creating account…", inputs disabled (~400ms latency simulated) |
-| Happy path | Register a fresh email, log in with same password | Routes to the placeholder authenticated screen |
-
-The mock's user store is in-memory and resets every time you close
-and reopen the popup (or reload the extension), so you can replay
-the happy path freely.
-
-### What I'd value feedback on
-
-- Copy: error messages, the master-password warning on Register, button labels.
-- Validation rules: minimum length is currently 12; password strength scoring is in `src/popup/validation.ts`.
-- The shape of the `ApiClient` interface in `src/api/client.ts` — is everything you need to return from the real endpoints expressible through this contract, or do we need to widen it (e.g. surfacing the encrypted vault key, refresh tokens, server-side error codes)?
-- Anything I should be doing differently before swapping the mock for the real `/auth/*` calls.
+| Email already taken | Re-register the same email | Red "Email already in use." banner |
+| Server unreachable | Stop the server, then submit | Red "Could not reach the server." banner |
+| Bad credentials | Log in with the wrong password | Red "That email and master password did not match." banner |
+| Happy path | Register a fresh email, log in | Routes to the vault list |
+| Add / Edit / Delete | Use the buttons on each row | Server stores `{site, encryptedBlob}` only |
+| Copy password | Click "Copy" | Plaintext copied to clipboard from worker memory |
+| Open site | Click "Open" | New tab to `https://<site>` |
+| Lock | Click "Lock" | Vault key wiped from memory; popup returns to Login |
+| Change master password | Header "Change password" | Re-wraps the vault key; signs you out |
 
 ### Iterating
 

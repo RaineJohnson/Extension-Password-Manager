@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { ApiError, getApiClient } from '../../api';
+import { ApiError, sendMessage } from '../../shared/messages';
 import { Field } from '../components/Field';
 import {
   scorePassword,
@@ -54,7 +54,7 @@ export function Register({ onRegistered, onSwitchToLogin }: RegisterProps) {
 
     setSubmitting(true);
     try {
-      await getApiClient().register(email, password);
+      await sendMessage({ type: 'auth/register', email, password });
       onRegistered();
     } catch (e) {
       if (e instanceof ApiError) {

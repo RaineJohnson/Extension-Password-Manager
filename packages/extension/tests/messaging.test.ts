@@ -13,21 +13,29 @@ describe('popup ↔ background messaging', () => {
     const res = await sendMessage({ type: 'ping' });
     const after = Date.now();
 
-    expect(res.type).toBe('pong');
+    expect(res.type).toBe('ping');
     expect(res.receivedAt).toBeGreaterThanOrEqual(before);
     expect(res.receivedAt).toBeLessThanOrEqual(after);
   });
 
   it('defaults to locked when storage.session is empty', async () => {
     const res = await sendMessage({ type: 'getStatus' });
-    expect(res).toEqual({ type: 'status', locked: true });
+    expect(res).toEqual({ type: 'getStatus', locked: true });
   });
 
   it('rehydrates lock status from storage.session on cold start', async () => {
-    await polyfill.storage.session.set({ state: { locked: false } });
+    await polyfill.storage.session.set({
+      state: {
+        locked: false,
+        email: 'alice@example.com',
+        accessToken: 'token',
+        refreshToken: 'refresh',
+        vaultKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      },
+    });
     await rehydrate();
 
     const res = await sendMessage({ type: 'getStatus' });
-    expect(res).toEqual({ type: 'status', locked: false });
+    expect(res).toEqual({ type: 'getStatus', locked: false });
   });
 });
