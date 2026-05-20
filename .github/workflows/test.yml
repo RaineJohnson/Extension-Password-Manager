@@ -39,7 +39,7 @@ jobs:
           node-version: 20
           cache: npm
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       - name: Run migrations
         working-directory: packages/server
         run: npx knex migrate:latest --knexfile knexfile.ts
