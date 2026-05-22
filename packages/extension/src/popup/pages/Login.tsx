@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { ApiError, getApiClient } from '../../api';
+import { ApiError, sendMessage } from '../../shared/messages';
 import { Field } from '../components/Field';
 import { validateEmail, validateMasterPassword } from '../validation';
 
@@ -27,7 +27,7 @@ export function Login({ onAuthenticated, onSwitchToRegister }: LoginProps) {
 
     setSubmitting(true);
     try {
-      await getApiClient().login(email, password);
+      await sendMessage({ type: 'auth/login', email, password });
       onAuthenticated();
     } catch (e) {
       if (e instanceof ApiError) {
