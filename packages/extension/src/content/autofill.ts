@@ -13,9 +13,9 @@
  *      and the local references are dropped.
  *
  * The script never receives the vault key. The service worker validates
- * `sender.id` before returning plaintext; a web page that injects a
- * `runtime.sendMessage` call wouldn't have the right sender id and is
- * rejected.
+ * `sender.id` and derives the page origin from the browser-populated
+ * sender URL before returning plaintext; a webpage cannot supply its own
+ * hostname to claim another site's credentials.
  */
 
 import browser from 'webextension-polyfill';
@@ -65,34 +65,38 @@ function renderTrigger(form: DetectedLoginForm): HTMLButtonElement {
   button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (!isTrustedAutofillActivation(event)) {
+      // The button lives in the page DOM so page scripts can find it and
+      // call `.click()`. Synthetic clicks must not release credentials;
+      // only a browser-trusted user activation can start autofill.
+      return;
+    }
     void onTriggerClicked(form);
   });
   return button;
 }
 
 async function onTriggerClicked(form: DetectedLoginForm): Promise<void> {
-  const hostname = window.location.hostname;
   try {
     const { matches } = await sendMessage({
       type: 'autofill/matches',
-      hostname,
     });
     if (matches.length === 0) {
       showToast('No saved credentials for this site.');
       return;
     }
     if (matches.length === 1) {
-      await fillFromMatch(form, hostname, matches[0]!);
+      await fillFromMatch(form, matches[0]!);
       return;
     }
     // Multi-match: surface a picker before any plaintext is requested.
     // Spec asks for the picker in the popup, but content scripts can't
     // portably trigger the browser-action popup. The security boundary
     // is unchanged — we only send the chosen id to the SW, which
-    // re-validates the hostname before releasing credentials.
+    // re-validates the sender origin before releasing credentials.
     // TODO(phase-3.5): when `browser.action.openPopup()` is portable,
     // route this through the popup instead.
-    renderPicker(matches, (match) => fillFromMatch(form, hostname, match));
+    renderPicker(matches, (match) => fillFromMatch(form, match));
   } catch (err) {
     showToast(err instanceof Error ? err.message : 'Autofill failed.');
   }
@@ -100,7 +104,6 @@ async function onTriggerClicked(form: DetectedLoginForm): Promise<void> {
 
 async function fillFromMatch(
   form: DetectedLoginForm,
-  hostname: string,
   match: AutofillMatch,
 ): Promise<void> {
   closePicker();
@@ -109,7 +112,6 @@ async function fillFromMatch(
     credentials = await sendMessage({
       type: 'autofill/credentials',
       id: match.id,
-      hostname,
     });
     if (form.usernameInput !== null) {
       fillField(form.usernameInput, credentials.username);
@@ -176,7 +178,10 @@ function renderPicker(
       borderRadius: '3px',
       cursor: 'pointer',
     });
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (event) => {
+      // This picker is also page-DOM. Reject scripted clicks for the
+      // same reason as the primary trigger button.
+      if (!isTrustedAutofillActivation(event)) return;
       void onPick(match);
     });
     panel.appendChild(item);
@@ -227,4 +232,8 @@ function showToast(text: string): void {
   });
   document.body.appendChild(toast);
   window.setTimeout(() => toast.remove(), 2500);
+}
+
+export function isTrustedAutofillActivation(event: Event): boolean {
+  return event.isTrusted;
 }

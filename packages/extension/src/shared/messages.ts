@@ -115,7 +115,6 @@ export interface AutofillMatch {
 
 export type AutofillMatchesRequest = {
   type: 'autofill/matches';
-  hostname: string;
 };
 export type AutofillMatchesSuccess = {
   type: 'autofill/matches';
@@ -124,14 +123,14 @@ export type AutofillMatchesSuccess = {
 
 /**
  * Fetch the plaintext credentials for a single previously-listed match.
- * `hostname` is re-checked against the stored item so a compromised
- * content script can't request arbitrary credentials by id — it can
- * only request the one that matches the page it's running on.
+ * The content script deliberately does not send a hostname/origin. The
+ * service worker derives that from `MessageSender.url`, which is supplied
+ * by the browser, so a compromised content script can't claim to be on a
+ * different site and redeem an arbitrary item id.
  */
 export type AutofillCredentialsRequest = {
   type: 'autofill/credentials';
   id: string;
-  hostname: string;
 };
 export type AutofillCredentialsSuccess = {
   type: 'autofill/credentials';

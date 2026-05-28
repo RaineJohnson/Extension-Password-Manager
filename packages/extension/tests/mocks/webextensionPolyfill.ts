@@ -13,9 +13,15 @@
 
 const TEST_EXTENSION_ID = 'test-extension-id';
 
+interface MockSender {
+  id?: string;
+  url?: string;
+  tab?: { url?: string };
+}
+
 type Listener = (
   msg: unknown,
-  sender: { id?: string },
+  sender: MockSender,
 ) => unknown | Promise<unknown>;
 
 const messageListeners: Listener[] = [];
@@ -24,7 +30,7 @@ const sessionStore = new Map<string, unknown>();
 
 async function dispatch(
   msg: unknown,
-  sender: { id?: string },
+  sender: MockSender,
 ): Promise<unknown> {
   for (const listener of messageListeners) {
     const result = await listener(msg, sender);
@@ -47,7 +53,10 @@ const polyfill = {
       },
     },
     async sendMessage(msg: unknown): Promise<unknown> {
-      return dispatch(msg, { id: TEST_EXTENSION_ID });
+      return dispatch(msg, {
+        id: TEST_EXTENSION_ID,
+        url: 'https://example.com/login',
+      });
     },
   },
   storage: {
@@ -97,7 +106,7 @@ export function __fireInstalled(): void {
  */
 export async function __sendMessageWithSender(
   msg: unknown,
-  sender: { id?: string },
+  sender: MockSender,
 ): Promise<unknown> {
   return dispatch(msg, sender);
 }

@@ -23,7 +23,6 @@ describe('autofill messaging', () => {
     await unlockVault();
     const res = await sendMessage({
       type: 'autofill/matches',
-      hostname: 'example.com',
     });
     expect(res.type).toBe('autofill/matches');
     expect(res.matches.length).toBeGreaterThan(0);
@@ -36,45 +35,93 @@ describe('autofill messaging', () => {
 
   it('returns an empty match list for an unknown hostname', async () => {
     await unlockVault();
-    const res = await sendMessage({
-      type: 'autofill/matches',
-      hostname: 'no-such-site.invalid',
-    });
-    expect(res.matches).toEqual([]);
+    const envelope = (await __sendMessageWithSender(
+      { type: 'autofill/matches' },
+      { id: polyfill.runtime.id, url: 'https://no-such-site.invalid/login' },
+    )) as Envelope;
+    expect(envelope.ok).toBe(true);
+    if (!envelope.ok) throw new Error('envelope should be ok');
+    expect(envelope.data.type).toBe('autofill/matches');
+    expect(envelope.data.matches).toEqual([]);
   });
 
-  it('returns plaintext credentials for a valid (id, hostname) pair', async () => {
+  it('returns plaintext credentials for a valid (id, sender origin) pair', async () => {
     await unlockVault();
-    const { matches } = await sendMessage({
-      type: 'autofill/matches',
-      hostname: 'github.com',
-    });
-    expect(matches).toHaveLength(1);
-    const res = await sendMessage({
-      type: 'autofill/credentials',
-      id: matches[0]!.id,
-      hostname: 'github.com',
-    });
-    expect(res.username).toBe('octocat');
-    expect(typeof res.password).toBe('string');
-    expect(res.password.length).toBeGreaterThan(0);
-  });
-
-  it('rejects a credential request whose hostname does not match the id', async () => {
-    await unlockVault();
-    const { matches } = await sendMessage({
-      type: 'autofill/matches',
-      hostname: 'github.com',
-    });
-    await expect(
-      sendMessage({
+    const matchesEnvelope = (await __sendMessageWithSender(
+      { type: 'autofill/matches' },
+      { id: polyfill.runtime.id, url: 'https://github.com/session' },
+    )) as Envelope;
+    expect(matchesEnvelope.ok).toBe(true);
+    if (!matchesEnvelope.ok) throw new Error('matches should be ok');
+    expect(matchesEnvelope.data.type).toBe('autofill/matches');
+    expect(matchesEnvelope.data.matches).toHaveLength(1);
+    const credentialsEnvelope = (await __sendMessageWithSender(
+      {
         type: 'autofill/credentials',
-        id: matches[0]!.id,
-        // A compromised content script that gets hold of a leaked
-        // match id can't redeem it on the wrong page.
-        hostname: 'attacker.example',
-      }),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        id: matchesEnvelope.data.matches[0]!.id,
+      },
+      { id: polyfill.runtime.id, url: 'https://github.com/session' },
+    )) as Envelope;
+    expect(credentialsEnvelope.ok).toBe(true);
+    if (!credentialsEnvelope.ok) throw new Error('credentials should be ok');
+    expect(credentialsEnvelope.data.type).toBe('autofill/credentials');
+    expect(credentialsEnvelope.data.username).toBe('octocat');
+    expect(typeof credentialsEnvelope.data.password).toBe('string');
+    expect(credentialsEnvelope.data.password.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a credential request whose sender origin does not match the id', async () => {
+    await unlockVault();
+    const matchesEnvelope = (await __sendMessageWithSender(
+      { type: 'autofill/matches' },
+      { id: polyfill.runtime.id, url: 'https://github.com/session' },
+    )) as Envelope;
+    expect(matchesEnvelope.ok).toBe(true);
+    if (!matchesEnvelope.ok) throw new Error('matches should be ok');
+    expect(matchesEnvelope.data.type).toBe('autofill/matches');
+    const envelope = (await __sendMessageWithSender(
+      {
+        type: 'autofill/credentials',
+        id: matchesEnvelope.data.matches[0]!.id,
+      },
+      { id: polyfill.runtime.id, url: 'https://attacker.example/login' },
+    )) as Envelope;
+    expect(envelope.ok).toBe(false);
+    if (envelope.ok) throw new Error('envelope should be error');
+    expect(envelope.code).toBe('NOT_FOUND');
+  });
+
+  it('ignores any caller-supplied hostname and derives the origin from sender.url', async () => {
+    await unlockVault();
+    const envelope = (await __sendMessageWithSender(
+      {
+        type: 'autofill/matches',
+        // Simulate a compromised content script trying to claim a
+        // different site. The worker must ignore this untyped extra
+        // property and use MessageSender.url instead.
+        hostname: 'github.com',
+      },
+      { id: polyfill.runtime.id, url: 'https://example.com/login' },
+    )) as Envelope;
+    expect(envelope.ok).toBe(true);
+    if (!envelope.ok) throw new Error('envelope should be ok');
+    expect(envelope.data.type).toBe('autofill/matches');
+    expect(envelope.data.matches).toHaveLength(2);
+    expect(envelope.data.matches.map((match) => match.username)).toEqual([
+      'alice@example.com',
+      'bob@example.com',
+    ]);
+  });
+
+  it('rejects autofill on non-HTTPS sender URLs', async () => {
+    await unlockVault();
+    const envelope = (await __sendMessageWithSender(
+      { type: 'autofill/matches' },
+      { id: polyfill.runtime.id, url: 'http://example.com/login' },
+    )) as Envelope;
+    expect(envelope.ok).toBe(false);
+    if (envelope.ok) throw new Error('envelope should be error');
+    expect(envelope.code).toBe('UNAUTHORIZED');
   });
 
   it('rejects autofill requests when the vault is locked', async () => {
@@ -82,13 +129,11 @@ describe('autofill messaging', () => {
     await expect(
       sendMessage({
         type: 'autofill/matches',
-        hostname: 'example.com',
       }),
     ).rejects.toBeInstanceOf(ApiError);
     await expect(
       sendMessage({
         type: 'autofill/matches',
-        hostname: 'example.com',
       }),
     ).rejects.toMatchObject({ code: 'LOCKED' });
   });
@@ -99,8 +144,8 @@ describe('autofill messaging', () => {
     // real browsers wouldn't surface our extension id as the sender,
     // and the SW must refuse to release any plaintext to it.
     const envelope = (await __sendMessageWithSender(
-      { type: 'autofill/matches', hostname: 'example.com' },
-      { id: 'foreign-extension-id' },
+      { type: 'autofill/matches' },
+      { id: 'foreign-extension-id', url: 'https://example.com/login' },
     )) as Envelope;
     expect(envelope.ok).toBe(false);
     if (envelope.ok) throw new Error('envelope should be error');
@@ -110,8 +155,8 @@ describe('autofill messaging', () => {
   it('also rejects messages from an undefined sender id', async () => {
     await unlockVault();
     const envelope = (await __sendMessageWithSender(
-      { type: 'autofill/matches', hostname: 'example.com' },
-      {},
+      { type: 'autofill/matches' },
+      { url: 'https://example.com/login' },
     )) as Envelope;
     expect(envelope.ok).toBe(false);
   });
