@@ -1,12 +1,18 @@
 /**
  * Build the extension once per browser, keyed off the `BROWSER` env var.
  *
- * `npm run build:chrome` → `dist-chrome/`, `npm run build:firefox` →
- * `dist-firefox/`. The popup is an HTML entry; the background script and
- * background script is emitted at a fixed top-level path so the manifests can
- * reference it by name (`background.js`). A small inline plugin copies the
- * matching `manifests/<browser>.json` to
- * `dist-<browser>/manifest.json` after the bundle is written.
+ * Two passes per browser:
+ *   1. `ENTRY=extension` (default) emits the popup HTML/asset chunks and
+ *      `background.js` as ES modules — that's what `popup.html` and the
+ *      MV3 service worker entry expect.
+ *   2. `ENTRY=content` emits `content.js` as a single self-contained IIFE
+ *      into the same `dist-<browser>/` directory. Content scripts in
+ *      MV3 don't have portable ESM support across Chrome and Firefox,
+ *      so the content script is bundled standalone and registered via
+ *      `content_scripts` in the manifest.
+ *
+ * `npm run build:chrome` chains both passes; the content pass uses
+ * `emptyOutDir: false` so it doesn't clobber the extension pass.
  */
 
 import { defineConfig } from 'vite';
@@ -18,9 +24,15 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 type Browser = 'chrome' | 'firefox';
+type Entry = 'extension' | 'content';
+
 const browser = (process.env.BROWSER ?? 'chrome') as Browser;
 if (browser !== 'chrome' && browser !== 'firefox') {
   throw new Error(`Unsupported BROWSER=${browser as string}; expected chrome|firefox`);
+}
+const entry = (process.env.ENTRY ?? 'extension') as Entry;
+if (entry !== 'extension' && entry !== 'content') {
+  throw new Error(`Unsupported ENTRY=${entry as string}; expected extension|content`);
 }
 
 const outDir = `dist-${browser}`;
@@ -32,7 +44,27 @@ const outDir = `dist-${browser}`;
 const apiBaseUrl = process.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 const sourcemap = process.env.VITE_SOURCEMAP === 'true';
 
-export default defineConfig({
+const contentConfig = defineConfig({
+  define: {
+    __API_BASE_URL__: JSON.stringify(apiBaseUrl),
+  },
+  plugins: [react()],
+  build: {
+    outDir,
+    emptyOutDir: false,
+    sourcemap,
+    rollupOptions: {
+      input: resolve(__dirname, 'src/content/autofill.ts'),
+      output: {
+        format: 'iife',
+        entryFileNames: 'content.js',
+        inlineDynamicImports: true,
+      },
+    },
+  },
+});
+
+const extensionConfig = defineConfig({
   define: {
     __API_BASE_URL__: JSON.stringify(apiBaseUrl),
   },
@@ -69,3 +101,5 @@ export default defineConfig({
     },
   },
 });
+
+export default entry === 'content' ? contentConfig : extensionConfig;

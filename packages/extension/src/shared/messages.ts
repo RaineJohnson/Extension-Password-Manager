@@ -103,6 +103,42 @@ export type VaultUpdateSuccess = { type: 'vault/update'; item: PopupVaultItem };
 export type VaultDeleteRequest = { type: 'vault/delete'; id: string };
 export type VaultDeleteSuccess = { type: 'vault/delete' };
 
+/**
+ * Metadata for a single hostname match. Username is included so a
+ * multi-match picker can render without ever touching plaintext
+ * passwords — those only cross the boundary on `autofill/credentials`.
+ */
+export interface AutofillMatch {
+  id: string;
+  username: string;
+}
+
+export type AutofillMatchesRequest = {
+  type: 'autofill/matches';
+  hostname: string;
+};
+export type AutofillMatchesSuccess = {
+  type: 'autofill/matches';
+  matches: AutofillMatch[];
+};
+
+/**
+ * Fetch the plaintext credentials for a single previously-listed match.
+ * `hostname` is re-checked against the stored item so a compromised
+ * content script can't request arbitrary credentials by id — it can
+ * only request the one that matches the page it's running on.
+ */
+export type AutofillCredentialsRequest = {
+  type: 'autofill/credentials';
+  id: string;
+  hostname: string;
+};
+export type AutofillCredentialsSuccess = {
+  type: 'autofill/credentials';
+  username: string;
+  password: string;
+};
+
 export type Request =
   | PingRequest
   | GetStatusRequest
@@ -113,7 +149,9 @@ export type Request =
   | VaultListRequest
   | VaultCreateRequest
   | VaultUpdateRequest
-  | VaultDeleteRequest;
+  | VaultDeleteRequest
+  | AutofillMatchesRequest
+  | AutofillCredentialsRequest;
 
 export type Success =
   | PingSuccess
@@ -125,7 +163,9 @@ export type Success =
   | VaultListSuccess
   | VaultCreateSuccess
   | VaultUpdateSuccess
-  | VaultDeleteSuccess;
+  | VaultDeleteSuccess
+  | AutofillMatchesSuccess
+  | AutofillCredentialsSuccess;
 
 export type SuccessFor<R extends Request> = Extract<Success, { type: R['type'] }>;
 
