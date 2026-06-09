@@ -18,7 +18,6 @@
  * hostname to claim another site's credentials.
  */
 
-import browser from 'webextension-polyfill';
 import { sendMessage, type AutofillMatch } from '../shared/messages';
 import { detectLoginForm, type DetectedLoginForm } from './formDetection';
 import { fillField } from './fill';
@@ -27,18 +26,51 @@ const BUTTON_ID = '__pm_autofill_trigger__';
 const PICKER_ID = '__pm_autofill_picker__';
 const TOAST_ID = '__pm_autofill_toast__';
 
-void browser.runtime.id;
+// The password input the current trigger button is anchored to. Tracked so
+// a re-scan can tell whether the button is still valid or was orphaned by a
+// client-side route change.
+let triggerTarget: HTMLInputElement | null = null;
+let rescanScheduled = false;
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', tryAttachTrigger, { once: true });
+  document.addEventListener('DOMContentLoaded', start, { once: true });
 } else {
-  queueMicrotask(tryAttachTrigger);
+  queueMicrotask(start);
+}
+
+function start(): void {
+  tryAttachTrigger();
+  // Detection at load only sees the static DOM. SPAs (React/Vue/etc.) mount
+  // their login form after an async fetch or a client-side route change, so
+  // we keep watching and re-scan whenever the DOM changes. Without this, the
+  // trigger button never appears on the many sites that render auth client-
+  // side. Mutation bursts (hydration) are coalesced into one scan per frame.
+  const observer = new MutationObserver(scheduleRescan);
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+function scheduleRescan(): void {
+  if (rescanScheduled) return;
+  rescanScheduled = true;
+  requestAnimationFrame(() => {
+    rescanScheduled = false;
+    tryAttachTrigger();
+  });
 }
 
 function tryAttachTrigger(): void {
+  const existing = document.getElementById(BUTTON_ID);
+  if (existing !== null) {
+    // A button is already up. Keep it while its form is still in the DOM;
+    // drop it if a route change unmounted the form so a fresh scan can
+    // re-anchor to whatever login form mounted in its place.
+    if (triggerTarget !== null && triggerTarget.isConnected) return;
+    existing.remove();
+    triggerTarget = null;
+  }
   const form = detectLoginForm();
   if (form === null) return;
-  if (document.getElementById(BUTTON_ID) !== null) return;
+  triggerTarget = form.passwordInput;
   document.body.appendChild(renderTrigger(form));
 }
 
@@ -102,7 +134,7 @@ async function onTriggerClicked(form: DetectedLoginForm): Promise<void> {
   }
 }
 
-async function fillFromMatch(
+export async function fillFromMatch(
   form: DetectedLoginForm,
   match: AutofillMatch,
 ): Promise<void> {
@@ -117,6 +149,14 @@ async function fillFromMatch(
       fillField(form.usernameInput, credentials.username);
     }
     fillField(form.passwordInput, credentials.password);
+  } catch (err) {
+    // Error handling must live here, not at the call sites. The picker
+    // invokes this as a fire-and-forget callback (`void onPick(match)`)
+    // long after onTriggerClicked has returned and its try/catch is gone,
+    // so a rejected credentials request (LOCKED / NOT_FOUND / network)
+    // would otherwise close the picker, fill nothing, and become an
+    // unhandled rejection the user never sees.
+    showToast(err instanceof Error ? err.message : 'Autofill failed.');
   } finally {
     // We can't truly wipe JS strings, but we can stop holding refs so
     // they become eligible for GC. The DOM still holds the password in
