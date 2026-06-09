@@ -3,18 +3,45 @@
  *
  * `runtime.sendMessage` invokes the registered `runtime.onMessage`
  * listeners directly and returns the first non-undefined result, which is
- * enough to round-trip a popup→worker request inside Jest. `storage.session`
- * is backed by a Map. Reset between tests with `__reset()`.
+ * enough to round-trip a popup→worker request inside Jest. The listener
+ * receives a `sender` shaped like the real `MessageSender`, with
+ * `sender.id === runtime.id` — that's what the worker uses to reject
+ * messages from foreign extensions. Tests that need to simulate a
+ * foreign sender call `__sendMessageWithSender` directly.
+ * `storage.session` is backed by a Map. Reset between tests with `__reset()`.
  */
 
-type Listener = (msg: unknown, sender: object) => unknown | Promise<unknown>;
+const TEST_EXTENSION_ID = 'test-extension-id';
+
+interface MockSender {
+  id?: string;
+  url?: string;
+  tab?: { url?: string };
+}
+
+type Listener = (
+  msg: unknown,
+  sender: MockSender,
+) => unknown | Promise<unknown>;
 
 const messageListeners: Listener[] = [];
 const installedListeners: Array<() => unknown> = [];
 const sessionStore = new Map<string, unknown>();
 
+async function dispatch(
+  msg: unknown,
+  sender: MockSender,
+): Promise<unknown> {
+  for (const listener of messageListeners) {
+    const result = await listener(msg, sender);
+    if (result !== undefined) return result;
+  }
+  return undefined;
+}
+
 const polyfill = {
   runtime: {
+    id: TEST_EXTENSION_ID,
     onInstalled: {
       addListener(fn: () => unknown) {
         installedListeners.push(fn);
@@ -26,11 +53,10 @@ const polyfill = {
       },
     },
     async sendMessage(msg: unknown): Promise<unknown> {
-      for (const listener of messageListeners) {
-        const result = await listener(msg, {});
-        if (result !== undefined) return result;
-      }
-      return undefined;
+      return dispatch(msg, {
+        id: TEST_EXTENSION_ID,
+        url: 'https://example.com/login',
+      });
     },
   },
   storage: {
@@ -71,6 +97,18 @@ export function __reset(): void {
 
 export function __fireInstalled(): void {
   for (const fn of installedListeners) fn();
+}
+
+/**
+ * Dispatch a message with a caller-controlled sender. Real browsers
+ * never let a webpage forge `sender.id`, so tests use this helper to
+ * simulate the attack we're defending against.
+ */
+export async function __sendMessageWithSender(
+  msg: unknown,
+  sender: MockSender,
+): Promise<unknown> {
+  return dispatch(msg, sender);
 }
 
 export default polyfill;

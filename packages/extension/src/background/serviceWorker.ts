@@ -25,6 +25,7 @@ import {
 import * as state from './state';
 import * as auth from './auth';
 import * as vault from './vault';
+import * as autofill from './autofill';
 
 const tokens: TokenStore = {
   getAccessToken: () => state.getAccessToken(),
@@ -50,7 +51,10 @@ const deps = { http };
 export const ready = state.initialize();
 export const rehydrate = state.initialize;
 
-async function dispatch(req: Request): Promise<Success> {
+async function dispatch(
+  req: Request,
+  sender: browser.Runtime.MessageSender,
+): Promise<Success> {
   switch (req.type) {
     case 'ping':
       return { type: 'ping', receivedAt: Date.now() };
@@ -94,14 +98,79 @@ async function dispatch(req: Request): Promise<Success> {
     case 'vault/delete':
       await vault.remove(deps, req.id);
       return { type: 'vault/delete' };
+    case 'autofill/matches': {
+      // Real lookup will decrypt items under the in-memory vault key,
+      // so a locked vault has nothing to return. The mock honours the
+      // same precondition so callers and tests can't depend on a
+      // weaker contract than the eventual implementation.
+      if (state.isLocked()) {
+        throw new ApiError('LOCKED', 'The vault is locked. Sign in to autofill.');
+      }
+      const origin = requireHttpsSenderOrigin(sender);
+      const matches = autofill.listMatches(origin);
+      return { type: 'autofill/matches', matches };
+    }
+    case 'autofill/credentials': {
+      if (state.isLocked()) {
+        throw new ApiError('LOCKED', 'The vault is locked. Sign in to autofill.');
+      }
+      const origin = requireHttpsSenderOrigin(sender);
+      const { username, password } = autofill.getCredentials(req.id, origin);
+      return { type: 'autofill/credentials', username, password };
+    }
   }
 }
 
-export async function handle(req: Request): Promise<Envelope> {
+function isLocalSender(
+  sender: browser.Runtime.MessageSender | undefined,
+): sender is browser.Runtime.MessageSender {
+  // `sender.id` is set by the browser to the id of the extension that
+  // originated the message. Our own popup and content scripts both
+  // surface `browser.runtime.id`; a foreign page can't forge this.
+  // We don't list `externally_connectable` in the manifest, so a
+  // foreign extension can't reach us either — this check stays as
+  // defense-in-depth so a future manifest change can't silently leak
+  // decrypted credentials to a webpage that calls `runtime.sendMessage`.
+  return sender !== undefined && sender.id === browser.runtime.id;
+}
+
+function requireHttpsSenderOrigin(
+  sender: browser.Runtime.MessageSender | undefined,
+): string {
+  const rawUrl = sender?.url ?? sender?.tab?.url;
+  if (rawUrl === undefined) {
+    throw new ApiError('UNAUTHORIZED', 'Autofill is only available from page content.');
+  }
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new ApiError('UNAUTHORIZED', 'Autofill sender URL is invalid.');
+  }
+  // Autofill credentials are origin-bound and HTTPS-only by default.
+  // We intentionally derive this from the browser-populated sender URL
+  // instead of trusting a hostname supplied by the content script.
+  if (url.protocol !== 'https:' || url.hostname === '') {
+    throw new ApiError('UNAUTHORIZED', 'Autofill is only available on HTTPS pages.');
+  }
+  return url.origin;
+}
+
+export async function handle(
+  req: Request,
+  sender?: browser.Runtime.MessageSender,
+): Promise<Envelope> {
   await ready;
   await state.expireIfNeeded();
+  if (!isLocalSender(sender)) {
+    return {
+      ok: false,
+      code: 'UNAUTHORIZED',
+      message: 'Message rejected: sender is not this extension.',
+    };
+  }
   try {
-    const data = await dispatch(req);
+    const data = await dispatch(req, sender);
     return { ok: true, data };
   } catch (e) {
     if (e instanceof ApiError) {
@@ -124,4 +193,7 @@ browser.runtime.onInstalled.addListener(() => {
   void state.resetForInstall();
 });
 
-browser.runtime.onMessage.addListener((raw: unknown) => handle(raw as Request));
+browser.runtime.onMessage.addListener(
+  (raw: unknown, sender: browser.Runtime.MessageSender) =>
+    handle(raw as Request, sender),
+);

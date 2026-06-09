@@ -5,8 +5,8 @@
   "description": "Browser extension (Chrome + Firefox) for the password manager.",
   "scripts": {
     "build": "npm run build:chrome && npm run build:firefox",
-    "build:chrome": "BROWSER=chrome vite build",
-    "build:firefox": "BROWSER=firefox vite build",
+    "build:chrome": "BROWSER=chrome vite build && BROWSER=chrome ENTRY=content vite build",
+    "build:firefox": "BROWSER=firefox vite build && BROWSER=firefox ENTRY=content vite build",
     "dev:chrome": "BROWSER=chrome vite build --watch",
     "dev:firefox": "BROWSER=firefox vite build --watch",
     "typecheck": "tsc --noEmit",
@@ -26,6 +26,7 @@
     "@types/webextension-polyfill": "^0.12.5",
     "@vitejs/plugin-react": "^6.0.0",
     "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.4.1",
     "ts-jest": "^29.4.9",
     "typescript": "^6.0.3",
     "vite": "^8.0.9"
